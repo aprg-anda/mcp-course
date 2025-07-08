@@ -45,15 +45,15 @@ async def analyze_file_changes(base_branch: str = "main", include_diff: bool = T
         # Note: This runs git in the server's CWD.
         # For a real-world scenario, you'd want to get the project directory
         # from the MCP context as shown in the original stub comments.
-        
+
         # Get changed files and statistics
         stat_command = ["git", "diff", "--stat", base_branch]
         stats_result = subprocess.run(stat_command, capture_output=True, text=True, check=True)
-        
+
         # Get list of changed files
         files_command = ["git", "diff", "--name-only", base_branch]
         files_result = subprocess.run(files_command, capture_output=True, text=True, check=True)
-        
+
         result = {
             "stats": stats_result.stdout.strip(),
             "changed_files": files_result.stdout.strip().splitlines(),
@@ -68,9 +68,9 @@ async def analyze_file_changes(base_branch: str = "main", include_diff: bool = T
                 result["diff"] = diff_result.stdout[:20000] + "\n... (diff truncated)"
             else:
                 result["diff"] = diff_result.stdout
-            
+
         return json.dumps(result, indent=2)
-        
+
     except FileNotFoundError:
         return json.dumps({"error": "Git not found. Make sure it's installed and in your PATH."})
     except subprocess.CalledProcessError as e:
@@ -80,26 +80,31 @@ async def analyze_file_changes(base_branch: str = "main", include_diff: bool = T
             "stdout": e.stdout,
             "stderr": e.stderr,
         })
+    except Exception as e:
+        return json.dumps({"error": str(e)})
 
 
 @mcp.tool()
 async def get_pr_templates() -> str:
     """List available PR templates with their content."""
-    templates = []
-    if not TEMPLATES_DIR.is_dir():
-        return json.dumps({"error": f"Templates directory not found: {TEMPLATES_DIR}"})
-        
-    for template_file in TEMPLATES_DIR.glob("*.md"):
-        try:
-            content = template_file.read_text(encoding="utf-8")
-            templates.append({"name": template_file.name, "content": content})
-        except Exception as e:
-            templates.append({"name": template_file.name, "error": f"Error reading template: {e}"})
-            
-    if not templates:
-        return json.dumps({"warning": "No templates found.", "path": str(TEMPLATES_DIR)})
+    try:
+        templates = {}
+        if not TEMPLATES_DIR.is_dir():
+            return json.dumps({"error": f"Templates directory not found: {TEMPLATES_DIR}"})
 
-    return json.dumps(templates, indent=2)
+        for template_file in TEMPLATES_DIR.glob("*.md"):
+            try:
+                content = template_file.read_text(encoding="utf-8")
+                templates[template_file.name] = content
+            except Exception as e:
+                templates[template_file.name] = f"Error reading template: {e}"
+
+        if not templates:
+            return json.dumps({"warning": "No templates found.", "path": str(TEMPLATES_DIR)})
+
+        return json.dumps(templates, indent=2)
+    except Exception as e:
+        return json.dumps({"error": str(e)})
 
 
 @mcp.tool()
@@ -110,37 +115,40 @@ async def suggest_template(changes_summary: str, change_type: str) -> str:
         changes_summary: Your analysis of what the changes do
         change_type: The type of change you've identified (bug, feature, docs, refactor, test, etc.)
     """
-    potential_template_name = f"{change_type.lower()}.md"
-    template_path = TEMPLATES_DIR / potential_template_name
-    
-    if template_path.is_file():
-        try:
-            content = template_path.read_text(encoding="utf-8")
-            return json.dumps({
-                "suggestion": potential_template_name,
-                "content": content,
-                "reason": f"The change type '{change_type}' directly maps to the '{potential_template_name}' template."
-            }, indent=2)
-        except Exception as e:
-            return json.dumps({"error": f"Error reading template '{potential_template_name}': {e}"})
-    
-    # Fallback to generic template
-    generic_template_path = TEMPLATES_DIR / "generic.md"
-    if generic_template_path.is_file():
-        try:
-            content = generic_template_path.read_text(encoding="utf-8")
-            return json.dumps({
-                "suggestion": "generic.md",
-                "content": content,
-                "reason": f"No specific template for '{change_type}' found. Falling back to 'generic.md'."
-            }, indent=2)
-        except Exception as e:
-            return json.dumps({"error": f"Error reading generic template: {e}"})
+    try:
+        potential_template_name = f"{change_type.lower()}.md"
+        template_path = TEMPLATES_DIR / potential_template_name
 
-    return json.dumps({
-        "error": f"No suitable template found for change type '{change_type}'.",
-        "hint": f"Consider creating a template named '{change_type.lower()}.md' or 'generic.md' in {TEMPLATES_DIR}."
-    })
+        if template_path.is_file():
+            try:
+                content = template_path.read_text(encoding="utf-8")
+                return json.dumps({
+                    "suggestion": potential_template_name,
+                    "content": content,
+                    "reason": f"The change type '{change_type}' directly maps to the '{potential_template_name}' template."
+                }, indent=2)
+            except Exception as e:
+                return json.dumps({"error": f"Error reading template '{potential_template_name}': {e}"})
+
+        # Fallback to generic template
+        generic_template_path = TEMPLATES_DIR / "generic.md"
+        if generic_template_path.is_file():
+            try:
+                content = generic_template_path.read_text(encoding="utf-8")
+                return json.dumps({
+                    "suggestion": "generic.md",
+                    "content": content,
+                    "reason": f"No specific template for '{change_type}' found. Falling back to 'generic.md'."
+                }, indent=2)
+            except Exception as e:
+                return json.dumps({"error": f"Error reading generic template: {e}"})
+
+        return json.dumps({
+            "error": f"No suitable template found for change type '{change_type}'.",
+            "hint": f"Consider creating a template named '{change_type.lower()}.md' or 'generic.md' in {TEMPLATES_DIR}."
+        })
+    except Exception as e:
+        return json.dumps({"error": str(e)})
 
 
 if __name__ == "__main__":
